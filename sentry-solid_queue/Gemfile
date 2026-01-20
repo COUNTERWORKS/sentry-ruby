@@ -1,0 +1,17 @@
+# frozen_string_literal: true
+
+source "https://rubygems.org"
+
+gemspec
+
+gem "sentry-ruby", path: "../sentry-ruby"
+
+group :test do
+  gem "rspec", "~> 3.0"
+  gem "rails", ">= 7.1"
+  gem "sqlite3"
+end
+
+group :development do
+  gem "solargraph"
+end
