@@ -29,6 +29,17 @@ RSpec.describe Sentry::SolidQueue::Instrumentation do
         "solid_queue"
       end
 
+      # Include base methods in a module so Instrumentation can override via super
+      include(Module.new do
+        def serialize
+          {}
+        end
+
+        def deserialize(job_data)
+          # no-op base
+        end
+      end)
+
       include Sentry::SolidQueue::Instrumentation
     end
   end
@@ -65,11 +76,11 @@ RSpec.describe Sentry::SolidQueue::Instrumentation do
 
       job_class.run_enqueue(job, block)
 
-      # Check arguments injection
-      last_arg = job.arguments.last
-      expect(last_arg).to have_key("_sentry_context")
-      expect(last_arg["_sentry_context"]["user"]).to eq({ id: 1 })
-      expect(last_arg["_sentry_context"]).to have_key("trace_propagation_headers")
+      sentry_context = job.instance_variable_get(:@_sentry_context)
+      expect(sentry_context).not_to be_nil
+      expect(sentry_context["user"]).to eq({ id: 1 })
+      expect(sentry_context).to have_key("trace_propagation_headers")
+      expect(job.arguments).to be_empty
 
       expect(block).to have_received(:call)
     end
@@ -77,16 +88,14 @@ RSpec.describe Sentry::SolidQueue::Instrumentation do
 
   describe ".around_perform" do
     before do
-      # Simulate enriched arguments from around_enqueue
-      job.arguments << {
-        "_sentry_context" => {
-          "user" => { "id" => 1 },
-          "trace_propagation_headers" => {
-            "sentry-trace" => "d4c73b374d6f44d8892f3e8f80211606-2ad312b67f9c4373-1",
-            "baggage" => "456"
-          }
+      # Simulate sentry context set by around_enqueue
+      job.instance_variable_set(:@_sentry_context, {
+        "user" => { "id" => 1 },
+        "trace_propagation_headers" => {
+          "sentry-trace" => "d4c73b374d6f44d8892f3e8f80211606-2ad312b67f9c4373-1",
+          "baggage" => "456"
         }
-      }
+      })
     end
 
     it "starts a transaction with propagated trace" do
@@ -100,9 +109,6 @@ RSpec.describe Sentry::SolidQueue::Instrumentation do
       job_class.run_perform(job, block)
 
       expect(block).to have_received(:call)
-
-      # Arguments should be cleaned
-      expect(job.arguments).to be_empty
 
       events = Sentry.get_current_client.transport.events
       expect(events.count).to eq(1)
@@ -130,9 +136,6 @@ RSpec.describe Sentry::SolidQueue::Instrumentation do
     end
 
     it "captures exception" do
-      # Ensure arguments are clean so no context extraction error
-      job.arguments.clear
-
       allow(block).to receive(:call).and_raise("boom")
 
       expect do
@@ -160,6 +163,34 @@ RSpec.describe Sentry::SolidQueue::Instrumentation do
         job_class.run_perform(job, block)
         expect(Sentry.get_current_client.transport.events).to be_empty
       end
+    end
+  end
+
+  describe "#serialize" do
+    let(:job_instance) { job_class.new }
+
+    it "includes @_sentry_context in serialized data" do
+      job_instance.instance_variable_set(:@_sentry_context, { "user" => { "id" => 1 } })
+      expect(job_instance.serialize["_sentry_context"]).to eq({ "user" => { "id" => 1 } })
+    end
+
+    it "includes nil when @_sentry_context is not set" do
+      expect(job_instance.serialize).to have_key("_sentry_context")
+      expect(job_instance.serialize["_sentry_context"]).to be_nil
+    end
+  end
+
+  describe "#deserialize" do
+    let(:job_instance) { job_class.new }
+
+    it "restores @_sentry_context from job data" do
+      job_instance.deserialize({ "_sentry_context" => { "user" => { "id" => 1 } } })
+      expect(job_instance.instance_variable_get(:@_sentry_context)).to eq({ "user" => { "id" => 1 } })
+    end
+
+    it "sets @_sentry_context to nil when key is absent (backward compat)" do
+      job_instance.deserialize({})
+      expect(job_instance.instance_variable_get(:@_sentry_context)).to be_nil
     end
   end
 end

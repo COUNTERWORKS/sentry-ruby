@@ -4,7 +4,7 @@ require "sentry/solid_queue/context_filter"
 RSpec.describe Sentry::SolidQueue::ContextFilter do
   let(:context) do
     {
-      "job_class" => "MyJob",
+      "class" => "MyJob",
       "job_id" => "123",
       "arguments" => ["arg1"],
       "queue_name" => "default"
