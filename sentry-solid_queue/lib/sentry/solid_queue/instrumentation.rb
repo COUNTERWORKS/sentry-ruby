@@ -19,7 +19,7 @@ module Sentry
           # Compact context to avoid sending empty keys
           sentry_context.compact!
 
-          job.arguments << { "_sentry_context" => sentry_context } unless sentry_context.empty?
+          job.instance_variable_set(:@_sentry_context, sentry_context) unless sentry_context.empty?
 
           Sentry.with_child_span(op: "queue.publish", description: job.class.name) do |span|
             if span
@@ -35,10 +35,7 @@ module Sentry
           next block.call unless Sentry.initialized?
           next block.call unless job.class.queue_adapter_name == "solid_queue"
 
-          # Extract and remove Sentry context from arguments
-          sentry_context = if job.arguments.last.is_a?(Hash) && job.arguments.last.key?("_sentry_context")
-            job.arguments.pop["_sentry_context"]
-          end || {}
+          sentry_context = job.instance_variable_get(:@_sentry_context) || {}
 
           # Setup Scope
           Sentry.clone_hub_to_current_thread
@@ -53,7 +50,7 @@ module Sentry
             "class" => job.class.name,
             "job_id" => job.job_id,
             "queue_name" => job.queue_name,
-            "arguments" => job.arguments # Arguments are now clean
+            "arguments" => job.arguments
           }
 
           scope.set_contexts(solid_queue: context)
@@ -99,6 +96,17 @@ module Sentry
 
           scope.clear
         end
+      end
+
+      # Override ActiveJob's serialize to persist sentry context across processes.
+      def serialize
+        super.merge("_sentry_context" => @_sentry_context)
+      end
+
+      # Override ActiveJob's deserialize to restore sentry context from persisted data.
+      def deserialize(job_data)
+        super
+        @_sentry_context = job_data["_sentry_context"]
       end
     end
   end

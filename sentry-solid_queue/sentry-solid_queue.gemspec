@@ -15,6 +15,6 @@ Gem::Specification.new do |spec|
 
   spec.files = Dir["lib/**/*", "Rakefile", "README.md", "LICENSE.txt"]
 
-  spec.add_dependency "sentry-ruby", "~> 6.2.0"
+  spec.add_dependency "sentry-ruby", "~> 6.3.0"
   spec.add_dependency "solid_queue", ">= 0.1" # Assuming 0.1+ for now
 end
